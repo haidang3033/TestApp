@@ -1,4 +1,4 @@
-name: Build RandoTone APK from ZIP
+name: Build RandoTone v0.2 APK from ZIP
 
 on:
   workflow_dispatch:
@@ -11,7 +11,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -24,31 +23,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
-      - name: Install stable Android SDK 36
-        shell: bash
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-
-      - name: Unpack project ZIP
-        shell: bash
-        run: |
-          rm -rf work
-          mkdir work
-          unzip -q RandoTone-v0.1.0-prototype-ci.zip -d work
-          PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-          test -n "$PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Use stable compile SDK 36
-        shell: bash
-        run: |
-          BUILD_FILE="$PROJECT_DIR/app/build.gradle.kts"
-          test -f "$BUILD_FILE"
-          sed -i 's/compileSdk = 37/compileSdk = 36/' "$BUILD_FILE"
-          echo "Android SDK config after patch:"
-          grep -E 'compileSdk|targetSdk|minSdk' "$BUILD_FILE"
+      - name: Install Android platform and build tools
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0" "platform-tools"
 
       - name: Set up Gradle 9.5.0
         uses: gradle/actions/setup-gradle@v6
@@ -56,23 +35,64 @@ jobs:
           gradle-version: '9.5.0'
           cache-provider: basic
 
+      - name: Unpack project ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf work
+          mkdir work
+          unzip -q RandoTone-v0.2.0-prototype-ci.zip -d work
+          PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -n "$PROJECT_DIR"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/prototype-signing.keystore"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify prototype signing key
+        shell: bash
+        run: |
+          keytool -list \
+            -keystore "$PROJECT_DIR/prototype-signing.keystore" \
+            -storepass randotone-prototype \
+            -alias randotone-prototype >/dev/null
+
       - name: Build signed debug APK
         shell: bash
         run: |
+          set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon --stacktrace :app:assembleDebug
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Show useful compiler errors on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== Compiler/build errors ====="
+          grep -nE '(^e: | error: |error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed)' build.log || true
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          apksigner verify --verbose --print-certs "$APK"
 
       - name: Collect APK
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist
-          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" \
-            dist/RandoTone-v0.1.0-debug-signed.apk
-          sha256sum dist/RandoTone-v0.1.0-debug-signed.apk > dist/SHA256SUMS.txt
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/RandoTone-v0.2.0-prototype.apk
+          sha256sum dist/RandoTone-v0.2.0-prototype.apk > dist/SHA256SUMS.txt
+          keytool -list -v \
+            -keystore "$PROJECT_DIR/prototype-signing.keystore" \
+            -storepass randotone-prototype \
+            -alias randotone-prototype \
+            | grep -E 'SHA256:' > dist/SIGNING_CERT_SHA256.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
-          name: RandoTone-v0.1.0-debug-signed
+          name: RandoTone-v0.2.0-prototype-signed
           path: dist/
           if-no-files-found: error
