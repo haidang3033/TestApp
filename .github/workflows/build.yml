@@ -1,4 +1,4 @@
-name: Build RandoTone APK from ZIP
+name: Build RandoTone APK from ZIPper
 
 on:
   workflow_dispatch:
