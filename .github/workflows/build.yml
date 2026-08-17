@@ -31,10 +31,51 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Unpack project ZIP
+        shell: bash
+        run: |
+          rm -rf work
+          mkdir work
+          unzip -q RandoTone-v0.1.0-prototype-ci.zip -d work
+          PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -n "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Use stable compile SDK 36
+        shell: bash
+        run: |
+          BUILD_FILE="$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$BUILD_FILE"
+          sed -i 's/compileSdk = 37/compileSdk = 36/' "$BUILD_FILE"
+          echo "Android SDK config after patch:"
+          grep -E 'compileSdk|targetSdk|minSdk' "$BUILD_FILE"
+
       - name: Set up Gradle 9.5.0
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.5.0'
+          cache-provider: basic
+
+      - name: Build signed debug APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" \
+            dist/RandoTone-v0.1.0-debug-signed.apk
+          sha256sum dist/RandoTone-v0.1.0-debug-signed.apk > dist/SHA256SUMS.txt
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: RandoTone-v0.1.0-debug-signed
+          path: dist/
+          if-no-files-found: error          gradle-version: '9.5.0'
           cache-provider: basic
 
       - name: Unpack project ZIP
