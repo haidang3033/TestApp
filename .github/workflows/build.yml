@@ -36,7 +36,7 @@ jobs:
         run: |
           rm -rf work
           mkdir work
-          unzip -q RandoTone-v0.1.0-prototype.zip -d work
+          unzip -q RandoTone-v0.1.0-prototype-ci.zip -d work
           PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
           test -n "$PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
