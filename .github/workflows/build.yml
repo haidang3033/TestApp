@@ -1,4 +1,4 @@
-name: Build RandoTone v0.3 APK
+name: Build osine v0.4 APK
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
     paths:
       - 'RandoTone-v0.2.0-prototype-ci.zip'
       - 'tools/patch-randotone-v0.3.py'
+      - 'tools/patch-osine-v0.4.py'
       - '.github/workflows/build.yml'
 
 permissions:
@@ -57,7 +58,7 @@ jobs:
           echo "GRADLE_BIN=$GRADLE_HOME/bin/gradle" >> "$GITHUB_ENV"
           "$GRADLE_HOME/bin/gradle" --version
 
-      - name: Assemble RandoTone v0.3 source tree
+      - name: Assemble osine v0.4 source tree
         shell: bash
         run: |
           set -euo pipefail
@@ -70,27 +71,40 @@ jobs:
           test -f "$PROJECT_DIR/prototype-signing.keystore"
 
           python3 tools/patch-randotone-v0.3.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.4.py "$PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify v0.3 lifecycle hardening source
+      - name: Verify osine v0.4 diagnostics source
         shell: bash
         run: |
           set -euo pipefail
           APP_BUILD="$PROJECT_DIR/app/build.gradle.kts"
           MANIFEST="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          STRINGS="$PROJECT_DIR/app/src/main/res/values/strings.xml"
           KOTLIN="$PROJECT_DIR/app/src/main/java/com/randotone/app"
 
           grep -q 'compileSdk = 36' "$APP_BUILD"
           grep -q 'targetSdk = 36' "$APP_BUILD"
-          grep -q 'versionCode = 3' "$APP_BUILD"
-          grep -q 'versionName = "0.3.0"' "$APP_BUILD"
+          grep -q 'versionCode = 4' "$APP_BUILD"
+          grep -q 'versionName = "0.4.0"' "$APP_BUILD"
+          grep -q '<string name="app_name">osine</string>' "$STRINGS"
+          grep -q 'android:name=".OsineApplication"' "$MANIFEST"
           grep -q 'RECEIVE_BOOT_COMPLETED' "$MANIFEST"
           grep -q 'ListenerRecoveryReceiver' "$MANIFEST"
           grep -q 'android.intent.action.BOOT_COMPLETED' "$MANIFEST"
-          grep -q 'override fun onListenerDisconnected' "$KOTLIN/RandoToneNotificationListener.kt"
-          grep -q 'ListenerRecovery.requestRebind(applicationContext, "listener-disconnected")' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q 'object OsineLog' "$KOTLIN/OsineLog.kt"
+          grep -q 'MAX_FILES = 5' "$KOTLIN/OsineLog.kt"
+          grep -q 'MAX_BYTES = 256L \* 1024L' "$KOTLIN/OsineLog.kt"
+          grep -q 'class OsineApplication' "$KOTLIN/OsineApplication.kt"
+          grep -q 'onTaskRemoved' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q 'OsineLog.event(applicationContext, "NLS", "onListenerConnected")' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q '"NOTIF"' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q 'OsineDiagnosticsSection' "$KOTLIN/MainActivity.kt"
+          grep -q 'Export logs' "$KOTLIN/MainActivity.kt"
+          grep -q 'Copy recent log' "$KOTLIN/MainActivity.kt"
+          grep -q 'Clear logs' "$KOTLIN/MainActivity.kt"
+          grep -q 'Notification message text is never recorded' "$KOTLIN/MainActivity.kt"
           grep -q 'NotificationListenerService.requestRebind(component)' "$KOTLIN/ListenerRecovery.kt"
-          grep -q 'Repair / rebind listener' "$KOTLIN/MainActivity.kt"
           grep -q 'fun updateNotificationEnabled(enabled: Boolean)' "$KOTLIN/RandoToneState.kt"
           grep -q 'android.substName' "$KOTLIN/RandoToneNotificationListener.kt"
 
@@ -99,7 +113,7 @@ jobs:
             -storepass randotone-prototype \
             -alias randotone-prototype >/dev/null
 
-          echo 'RandoTone v0.3 source and signing identity verified.'
+          echo 'osine v0.4 source, diagnostics and signing identity verified.'
 
       - name: Build signed debug APK
         shell: bash
@@ -116,7 +130,7 @@ jobs:
           if test -f build.log; then
             grep -nE '(^e: | error: |error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|Could not resolve|SDK location not found)' build.log || true
           else
-            echo 'Build did not reach Gradle compilation; inspect the failed setup step above.'
+            echo 'Build did not reach Gradle compilation; inspect the failed setup or patch step above.'
           fi
 
       - name: Verify APK signature
@@ -134,8 +148,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/RandoTone-v0.3.0-prototype.apk
-          sha256sum dist/RandoTone-v0.3.0-prototype.apk > dist/SHA256SUMS.txt
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/osine-v0.4.0-diagnostics.apk
+          sha256sum dist/osine-v0.4.0-diagnostics.apk > dist/SHA256SUMS.txt
           keytool -list -v \
             -keystore "$PROJECT_DIR/prototype-signing.keystore" \
             -storepass randotone-prototype \
@@ -145,7 +159,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
-          name: RandoTone-v0.3.0-prototype-signed
+          name: osine-v0.4.0-diagnostics-signed
           path: dist/
           if-no-files-found: error
           retention-days: 30
