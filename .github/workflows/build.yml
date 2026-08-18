@@ -86,6 +86,29 @@ jobs:
           echo 'After normalization:'
           grep -E 'compileSdk|targetSdk|minSdk' "$APP_BUILD"
 
+      - name: Patch hidden Android notification constant
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="$PROJECT_DIR/app/src/main/java/com/randotone/app/RandoToneNotificationListener.kt"
+          test -f "$SOURCE"
+
+          python3 - "$SOURCE" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text(encoding="utf-8")
+          needle = "Notification.EXTRA_SUBSTITUTE_APP_NAME"
+          replacement = '"android.substName"'
+          count = text.count(needle)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one {needle!r} reference, found {count}")
+          path.write_text(text.replace(needle, replacement), encoding="utf-8")
+          PY
+
+          grep -nF 'android.substName' "$SOURCE"
+
       - name: Verify pinned build toolchain
         shell: bash
         run: |
