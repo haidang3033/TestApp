@@ -7,7 +7,7 @@ on:
     paths:
       - 'NotifLab-v0.1.0-ci.zip'
       - 'NotifLab-v0.2.0-src/**'
-      - 'NotifLab-v0.3.0-src.zip'
+      - 'NotifLab-v0.3.0-src/**'
       - '.github/workflows/build-notiflab.yml'
 
 permissions:
@@ -50,8 +50,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$RUNNER_TEMP/notiflab" "$RUNNER_TEMP/notiflab-v03-src"
-          mkdir -p "$RUNNER_TEMP/notiflab" "$RUNNER_TEMP/notiflab-v03-src"
+          rm -rf "$RUNNER_TEMP/notiflab"
+          mkdir -p "$RUNNER_TEMP/notiflab"
 
           # v0.1 carries the stable prototype signing key and minimal Android project skeleton.
           unzip -q NotifLab-v0.1.0-ci.zip -d "$RUNNER_TEMP/notiflab"
@@ -59,9 +59,12 @@ jobs:
           test -f "$PROJECT_DIR/settings.gradle.kts"
           test -f "$PROJECT_DIR/notiflab-signing.keystore"
 
-          # v0.3 source ZIP intentionally contains source overrides only, no signing key.
-          unzip -q NotifLab-v0.3.0-src.zip -d "$RUNNER_TEMP/notiflab-v03-src"
-          V03="$RUNNER_TEMP/notiflab-v03-src/NotifLab-v0.3.0-src"
+          # v0.3 source is committed as plain files so CI does not depend on a second ZIP archive.
+          V03="$GITHUB_WORKSPACE/NotifLab-v0.3.0-src"
+          test -f "$V03/app/build.gradle.kts"
+          test -f "$V03/app/src/main/AndroidManifest.xml"
+          test -f "$V03/app/src/main/java/com/randotone/notiflab/MainActivity.kt"
+          test -f "$V03/app/src/main/java/com/randotone/notiflab/NotifLabService.kt"
 
           cp "$V03/app/build.gradle.kts" "$PROJECT_DIR/app/build.gradle.kts"
           cp "$V03/app/src/main/AndroidManifest.xml" "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
