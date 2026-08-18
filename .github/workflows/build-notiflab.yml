@@ -1,0 +1,107 @@
+name: Build NotifLab APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'NotifLab-v0.1.0-ci.zip'
+      - '.github/workflows/build-notiflab.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install verified Gradle 9.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_ZIP="$RUNNER_TEMP/gradle-9.5.0-bin.zip"
+          curl -fL --retry 3 -o "$GRADLE_ZIP" https://services.gradle.org/distributions/gradle-9.5.0-bin.zip
+          echo "553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746  $GRADLE_ZIP" | sha256sum -c -
+          unzip -q "$GRADLE_ZIP" -d "$RUNNER_TEMP"
+          echo "GRADLE_BIN=$RUNNER_TEMP/gradle-9.5.0/bin/gradle" >> "$GITHUB_ENV"
+
+      - name: Unpack NotifLab
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/notiflab"
+          mkdir -p "$RUNNER_TEMP/notiflab"
+          unzip -q NotifLab-v0.1.0-ci.zip -d "$RUNNER_TEMP/notiflab"
+          PROJECT_DIR="$RUNNER_TEMP/notiflab/NotifLab-v0.1.0"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify toolchain and signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          "$GRADLE_BIN" --version
+          test -d "$ANDROID_HOME/platforms/android-36"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          test -f "$PROJECT_DIR/notiflab-signing.keystore"
+          grep -q 'compileSdk = 36' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -q 'targetSdk = 36' "$PROJECT_DIR/app/build.gradle.kts"
+
+      - name: Build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          "$GRADLE_BIN" --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/notiflab-build.log"
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+
+      - name: Collect artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/NotifLab-v0.1.0.apk
+          sha256sum dist/NotifLab-v0.1.0.apk > dist/SHA256SUMS.txt
+          keytool -list -v \
+            -keystore "$PROJECT_DIR/notiflab-signing.keystore" \
+            -storepass notiflab-prototype \
+            -alias notiflab-prototype \
+            | grep 'SHA256:' > dist/SIGNING_CERT_SHA256.txt
+
+      - name: Upload NotifLab APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NotifLab-v0.1.0
+          path: |
+            dist/NotifLab-v0.1.0.apk
+            dist/SHA256SUMS.txt
+            dist/SIGNING_CERT_SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
