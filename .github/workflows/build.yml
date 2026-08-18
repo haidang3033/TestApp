@@ -32,11 +32,29 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.5.0
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '9.5.0'
-          cache-provider: basic
+      - name: Install verified Gradle 9.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_ZIP="$RUNNER_TEMP/gradle-9.5.0-bin.zip"
+          GRADLE_HOME="$RUNNER_TEMP/gradle-9.5.0"
+
+          curl -fL \
+            --retry 5 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            -o "$GRADLE_ZIP" \
+            "https://services.gradle.org/distributions/gradle-9.5.0-bin.zip"
+
+          echo "553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746  $GRADLE_ZIP" | sha256sum -c -
+
+          rm -rf "$GRADLE_HOME"
+          unzip -q "$GRADLE_ZIP" -d "$RUNNER_TEMP"
+          test -x "$GRADLE_HOME/bin/gradle"
+
+          echo "$GRADLE_HOME/bin" >> "$GITHUB_PATH"
+          echo "GRADLE_BIN=$GRADLE_HOME/bin/gradle" >> "$GITHUB_ENV"
+          "$GRADLE_HOME/bin/gradle" --version
 
       - name: Unpack project ZIP
         shell: bash
@@ -71,6 +89,7 @@ jobs:
             exit 1
           fi
 
+          "$GRADLE_BIN" --version | grep -q 'Gradle 9.5.0'
           echo 'Pinned toolchain verified: SDK 36 / Build Tools 36.0.0 / AGP 9.3.0 / Gradle 9.5.0 / JDK 17'
 
       - name: Verify prototype signing key
@@ -87,14 +106,18 @@ jobs:
         run: |
           set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          "$GRADLE_BIN" --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
 
       - name: Show useful compiler errors on failure
         if: failure()
         shell: bash
         run: |
           echo "===== Compiler/build errors ====="
-          grep -nE '(^e: | error: |error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|Could not resolve|SDK location not found)' build.log || true
+          if test -f build.log; then
+            grep -nE '(^e: | error: |error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|Could not resolve|SDK location not found)' build.log || true
+          else
+            echo 'Build did not reach Gradle compilation; inspect the failed setup step above.'
+          fi
 
       - name: Verify APK signature
         shell: bash
