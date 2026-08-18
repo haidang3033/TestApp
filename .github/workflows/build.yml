@@ -79,17 +79,39 @@ jobs:
           ROOT_BUILD="$PROJECT_DIR/build.gradle.kts"
           WRAPPER="$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
 
-          grep -q 'compileSdk = 36' "$APP_BUILD"
-          grep -q 'targetSdk = 36' "$APP_BUILD"
-          grep -q 'id("com.android.application") version "9.3.0"' "$ROOT_BUILD"
-          grep -q 'gradle-9.5.0-bin.zip' "$WRAPPER"
+          require_text() {
+            local label="$1"
+            local text="$2"
+            local file="$3"
+            if grep -Fq "$text" "$file"; then
+              echo "OK: $label"
+            else
+              echo "ERROR: $label not found in $file" >&2
+              exit 1
+            fi
+          }
 
-          if grep -R -n 'android-37\|compileSdk = 37\|targetSdk = 37' "$PROJECT_DIR" --exclude='*.keystore'; then
+          require_text "compileSdk 36" 'compileSdk = 36' "$APP_BUILD"
+          require_text "targetSdk 36" 'targetSdk = 36' "$APP_BUILD"
+          require_text "AGP 9.3.0" 'id("com.android.application") version "9.3.0"' "$ROOT_BUILD"
+          require_text "Gradle wrapper 9.5.0" 'gradle-9.5.0-bin.zip' "$WRAPPER"
+
+          if grep -R -nE 'android-37|compileSdk[[:space:]]*=[[:space:]]*37|targetSdk[[:space:]]*=[[:space:]]*37' "$PROJECT_DIR" --exclude='*.keystore'; then
             echo 'ERROR: API 37 reference found in project.' >&2
+            exit 1
+          else
+            echo 'OK: no API 37 references'
+          fi
+
+          GRADLE_VERSION_OUTPUT="$("$GRADLE_BIN" --version)"
+          if grep -Fq 'Gradle 9.5.0' <<< "$GRADLE_VERSION_OUTPUT"; then
+            echo 'OK: executable Gradle 9.5.0'
+          else
+            echo 'ERROR: installed Gradle is not 9.5.0' >&2
+            printf '%s\n' "$GRADLE_VERSION_OUTPUT" >&2
             exit 1
           fi
 
-          "$GRADLE_BIN" --version | grep -q 'Gradle 9.5.0'
           echo 'Pinned toolchain verified: SDK 36 / Build Tools 36.0.0 / AGP 9.3.0 / Gradle 9.5.0 / JDK 17'
 
       - name: Verify prototype signing key
