@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'NotifLab-v0.1.0-ci.zip'
+      - 'NotifLab-v0.2.0-src/**'
       - '.github/workflows/build-notiflab.yml'
 
 permissions:
@@ -44,7 +45,7 @@ jobs:
           unzip -q "$GRADLE_ZIP" -d "$RUNNER_TEMP"
           echo "GRADLE_BIN=$RUNNER_TEMP/gradle-9.5.0/bin/gradle" >> "$GITHUB_ENV"
 
-      - name: Unpack NotifLab
+      - name: Assemble NotifLab v0.2 source tree
         shell: bash
         run: |
           set -euo pipefail
@@ -53,9 +54,15 @@ jobs:
           unzip -q NotifLab-v0.1.0-ci.zip -d "$RUNNER_TEMP/notiflab"
           PROJECT_DIR="$RUNNER_TEMP/notiflab/NotifLab-v0.1.0"
           test -f "$PROJECT_DIR/settings.gradle.kts"
+
+          cp NotifLab-v0.2.0-src/app/build.gradle.kts "$PROJECT_DIR/app/build.gradle.kts"
+          cp NotifLab-v0.2.0-src/app/src/main/java/com/randotone/notiflab/MainActivity.kt \
+            "$PROJECT_DIR/app/src/main/java/com/randotone/notiflab/MainActivity.kt"
+          cp NotifLab-v0.2.0-src/README.md "$PROJECT_DIR/README.md"
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify toolchain and signing key
+      - name: Verify toolchain, v0.2 source, and signing key
         shell: bash
         run: |
           set -euo pipefail
@@ -66,6 +73,10 @@ jobs:
           test -f "$PROJECT_DIR/notiflab-signing.keystore"
           grep -q 'compileSdk = 36' "$PROJECT_DIR/app/build.gradle.kts"
           grep -q 'targetSdk = 36' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -q 'versionCode = 2' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -q 'versionName = "0.2.0"' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -q 'private fun startTimed' "$PROJECT_DIR/app/src/main/java/com/randotone/notiflab/MainActivity.kt"
+          grep -q '"/timed-start"' "$PROJECT_DIR/app/src/main/java/com/randotone/notiflab/MainActivity.kt"
 
       - name: Build APK
         shell: bash
@@ -87,8 +98,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/NotifLab-v0.1.0.apk
-          sha256sum dist/NotifLab-v0.1.0.apk > dist/SHA256SUMS.txt
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/NotifLab-v0.2.0.apk
+          sha256sum dist/NotifLab-v0.2.0.apk > dist/SHA256SUMS.txt
           keytool -list -v \
             -keystore "$PROJECT_DIR/notiflab-signing.keystore" \
             -storepass notiflab-prototype \
@@ -98,9 +109,9 @@ jobs:
       - name: Upload NotifLab APK
         uses: actions/upload-artifact@v4
         with:
-          name: NotifLab-v0.1.0
+          name: NotifLab-v0.2.0
           path: |
-            dist/NotifLab-v0.1.0.apk
+            dist/NotifLab-v0.2.0.apk
             dist/SHA256SUMS.txt
             dist/SIGNING_CERT_SHA256.txt
           if-no-files-found: error
