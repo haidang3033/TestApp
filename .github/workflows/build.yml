@@ -1,9 +1,13 @@
-name: Build RandoTone v0.2 APK from ZIP
+name: Build RandoTone v0.3 APK
 
 on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
+    paths:
+      - 'RandoTone-v0.2.0-prototype-ci.zip'
+      - 'tools/patch-randotone-v0.3.py'
+      - '.github/workflows/build.yml'
 
 permissions:
   contents: read
@@ -47,16 +51,13 @@ jobs:
             "https://services.gradle.org/distributions/gradle-9.5.0-bin.zip"
 
           echo "553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746  $GRADLE_ZIP" | sha256sum -c -
-
           rm -rf "$GRADLE_HOME"
           unzip -q "$GRADLE_ZIP" -d "$RUNNER_TEMP"
           test -x "$GRADLE_HOME/bin/gradle"
-
-          echo "$GRADLE_HOME/bin" >> "$GITHUB_PATH"
           echo "GRADLE_BIN=$GRADLE_HOME/bin/gradle" >> "$GITHUB_ENV"
           "$GRADLE_HOME/bin/gradle" --version
 
-      - name: Unpack project ZIP
+      - name: Assemble RandoTone v0.3 source tree
         shell: bash
         run: |
           set -euo pipefail
@@ -66,127 +67,39 @@ jobs:
           PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
           test -n "$PROJECT_DIR"
           test -f "$PROJECT_DIR/app/build.gradle.kts"
-          test -f "$PROJECT_DIR/build.gradle.kts"
-          test -f "$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
           test -f "$PROJECT_DIR/prototype-signing.keystore"
+
+          python3 tools/patch-randotone-v0.3.py "$PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Normalize project to stable SDK 36
+      - name: Verify v0.3 lifecycle hardening source
         shell: bash
         run: |
           set -euo pipefail
           APP_BUILD="$PROJECT_DIR/app/build.gradle.kts"
+          MANIFEST="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          KOTLIN="$PROJECT_DIR/app/src/main/java/com/randotone/app"
 
-          echo 'Before normalization:'
-          grep -E 'compileSdk|targetSdk|minSdk' "$APP_BUILD" || true
+          grep -q 'compileSdk = 36' "$APP_BUILD"
+          grep -q 'targetSdk = 36' "$APP_BUILD"
+          grep -q 'versionCode = 3' "$APP_BUILD"
+          grep -q 'versionName = "0.3.0"' "$APP_BUILD"
+          grep -q 'RECEIVE_BOOT_COMPLETED' "$MANIFEST"
+          grep -q 'ListenerRecoveryReceiver' "$MANIFEST"
+          grep -q 'android.intent.action.BOOT_COMPLETED' "$MANIFEST"
+          grep -q 'override fun onListenerDisconnected' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q 'ListenerRecovery.requestRebind(applicationContext, "listener-disconnected")' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q 'NotificationListenerService.requestRebind(component)' "$KOTLIN/ListenerRecovery.kt"
+          grep -q 'Repair / rebind listener' "$KOTLIN/MainActivity.kt"
+          grep -q 'fun updateNotificationEnabled(enabled: Boolean)' "$KOTLIN/RandoToneState.kt"
+          grep -q 'android.substName' "$KOTLIN/RandoToneNotificationListener.kt"
 
-          sed -E -i 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/' "$APP_BUILD"
-          sed -E -i 's/targetSdk[[:space:]]*=[[:space:]]*[0-9]+/targetSdk = 36/' "$APP_BUILD"
-
-          echo 'After normalization:'
-          grep -E 'compileSdk|targetSdk|minSdk' "$APP_BUILD"
-
-      - name: Patch Android and Kotlin compatibility
-        shell: bash
-        run: |
-          set -euo pipefail
-          LISTENER="$PROJECT_DIR/app/src/main/java/com/randotone/app/RandoToneNotificationListener.kt"
-          STATE="$PROJECT_DIR/app/src/main/java/com/randotone/app/RandoToneState.kt"
-          ACTIVITY="$PROJECT_DIR/app/src/main/java/com/randotone/app/MainActivity.kt"
-          test -f "$LISTENER"
-          test -f "$STATE"
-          test -f "$ACTIVITY"
-
-          python3 - "$LISTENER" "$STATE" "$ACTIVITY" <<'PY'
-          from pathlib import Path
-          import sys
-
-          listener = Path(sys.argv[1])
-          state = Path(sys.argv[2])
-          activity = Path(sys.argv[3])
-
-          def replace_exact(path: Path, old: str, new: str, expected: int = 1):
-              text = path.read_text(encoding="utf-8")
-              count = text.count(old)
-              if count != expected:
-                  raise SystemExit(
-                      f"Expected {expected} occurrence(s) of {old!r} in {path}, found {count}"
-                  )
-              path.write_text(text.replace(old, new), encoding="utf-8")
-
-          replace_exact(
-              listener,
-              "Notification.EXTRA_SUBSTITUTE_APP_NAME",
-              '"android.substName"',
-          )
-          replace_exact(
-              state,
-              "fun setNotificationEnabled(enabled: Boolean)",
-              "fun updateNotificationEnabled(enabled: Boolean)",
-          )
-          replace_exact(
-              activity,
-              "state.setNotificationEnabled(it)",
-              "state.updateNotificationEnabled(it)",
-          )
-          PY
-
-          grep -nF 'android.substName' "$LISTENER"
-          grep -nF 'fun updateNotificationEnabled(enabled: Boolean)' "$STATE"
-          grep -nF 'state.updateNotificationEnabled(it)' "$ACTIVITY"
-
-      - name: Verify pinned build toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP_BUILD="$PROJECT_DIR/app/build.gradle.kts"
-          ROOT_BUILD="$PROJECT_DIR/build.gradle.kts"
-          WRAPPER="$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
-
-          require_text() {
-            local label="$1"
-            local text="$2"
-            local file="$3"
-            if grep -Fq "$text" "$file"; then
-              echo "OK: $label"
-            else
-              echo "ERROR: $label not found in $file" >&2
-              echo "----- $file -----" >&2
-              cat "$file" >&2
-              exit 1
-            fi
-          }
-
-          require_text "compileSdk 36" 'compileSdk = 36' "$APP_BUILD"
-          require_text "targetSdk 36" 'targetSdk = 36' "$APP_BUILD"
-          require_text "AGP 9.3.0" 'id("com.android.application") version "9.3.0"' "$ROOT_BUILD"
-          require_text "Gradle wrapper 9.5.0" 'gradle-9.5.0-bin.zip' "$WRAPPER"
-
-          if grep -nE 'compileSdk[[:space:]]*=[[:space:]]*37|targetSdk[[:space:]]*=[[:space:]]*37' "$APP_BUILD"; then
-            echo 'ERROR: API 37 still present in app build config.' >&2
-            exit 1
-          fi
-          echo 'OK: app build config has no API 37 target'
-
-          GRADLE_VERSION_OUTPUT="$("$GRADLE_BIN" --version)"
-          if grep -Fq 'Gradle 9.5.0' <<< "$GRADLE_VERSION_OUTPUT"; then
-            echo 'OK: executable Gradle 9.5.0'
-          else
-            echo 'ERROR: installed Gradle is not 9.5.0' >&2
-            printf '%s\n' "$GRADLE_VERSION_OUTPUT" >&2
-            exit 1
-          fi
-
-          echo 'Pinned toolchain verified: SDK 36 / Build Tools 36.0.0 / AGP 9.3.0 / Gradle 9.5.0 / JDK 17'
-
-      - name: Verify prototype signing key
-        shell: bash
-        run: |
-          set -euo pipefail
           keytool -list \
             -keystore "$PROJECT_DIR/prototype-signing.keystore" \
             -storepass randotone-prototype \
             -alias randotone-prototype >/dev/null
+
+          echo 'RandoTone v0.3 source and signing identity verified.'
 
       - name: Build signed debug APK
         shell: bash
@@ -221,8 +134,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/RandoTone-v0.2.0-prototype.apk
-          sha256sum dist/RandoTone-v0.2.0-prototype.apk > dist/SHA256SUMS.txt
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/RandoTone-v0.3.0-prototype.apk
+          sha256sum dist/RandoTone-v0.3.0-prototype.apk > dist/SHA256SUMS.txt
           keytool -list -v \
             -keystore "$PROJECT_DIR/prototype-signing.keystore" \
             -storepass randotone-prototype \
@@ -232,6 +145,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
-          name: RandoTone-v0.2.0-prototype-signed
+          name: RandoTone-v0.3.0-prototype-signed
           path: dist/
           if-no-files-found: error
+          retention-days: 30
