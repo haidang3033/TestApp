@@ -24,7 +24,10 @@ def normalize_opening_tag(source: str, tag: str, component_name: str) -> str:
         )
         remaining = name_pattern.sub("", attrs, count=1).strip()
 
-        replacement = f'<{tag}\n            android:name="{component_name}"'
+        # v0.7's original patcher expects `<tag <newline>` because its regex is
+        # `<tag\\s+\\n...`. Keep this intentionally odd single space before the newline
+        # so the existing patcher can proceed without changing any lifecycle behavior.
+        replacement = f'<{tag} \n            android:name="{component_name}"'
         if remaining:
             replacement += " " + remaining
         replacement += ">"
