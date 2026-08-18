@@ -86,28 +86,54 @@ jobs:
           echo 'After normalization:'
           grep -E 'compileSdk|targetSdk|minSdk' "$APP_BUILD"
 
-      - name: Patch hidden Android notification constant
+      - name: Patch Android and Kotlin compatibility
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE="$PROJECT_DIR/app/src/main/java/com/randotone/app/RandoToneNotificationListener.kt"
-          test -f "$SOURCE"
+          LISTENER="$PROJECT_DIR/app/src/main/java/com/randotone/app/RandoToneNotificationListener.kt"
+          STATE="$PROJECT_DIR/app/src/main/java/com/randotone/app/RandoToneState.kt"
+          ACTIVITY="$PROJECT_DIR/app/src/main/java/com/randotone/app/MainActivity.kt"
+          test -f "$LISTENER"
+          test -f "$STATE"
+          test -f "$ACTIVITY"
 
-          python3 - "$SOURCE" <<'PY'
+          python3 - "$LISTENER" "$STATE" "$ACTIVITY" <<'PY'
           from pathlib import Path
           import sys
 
-          path = Path(sys.argv[1])
-          text = path.read_text(encoding="utf-8")
-          needle = "Notification.EXTRA_SUBSTITUTE_APP_NAME"
-          replacement = '"android.substName"'
-          count = text.count(needle)
-          if count != 1:
-              raise SystemExit(f"Expected exactly one {needle!r} reference, found {count}")
-          path.write_text(text.replace(needle, replacement), encoding="utf-8")
+          listener = Path(sys.argv[1])
+          state = Path(sys.argv[2])
+          activity = Path(sys.argv[3])
+
+          def replace_exact(path: Path, old: str, new: str, expected: int = 1):
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(
+                      f"Expected {expected} occurrence(s) of {old!r} in {path}, found {count}"
+                  )
+              path.write_text(text.replace(old, new), encoding="utf-8")
+
+          replace_exact(
+              listener,
+              "Notification.EXTRA_SUBSTITUTE_APP_NAME",
+              '"android.substName"',
+          )
+          replace_exact(
+              state,
+              "fun setNotificationEnabled(enabled: Boolean)",
+              "fun updateNotificationEnabled(enabled: Boolean)",
+          )
+          replace_exact(
+              activity,
+              "state.setNotificationEnabled(it)",
+              "state.updateNotificationEnabled(it)",
+          )
           PY
 
-          grep -nF 'android.substName' "$SOURCE"
+          grep -nF 'android.substName' "$LISTENER"
+          grep -nF 'fun updateNotificationEnabled(enabled: Boolean)' "$STATE"
+          grep -nF 'state.updateNotificationEnabled(it)' "$ACTIVITY"
 
       - name: Verify pinned build toolchain
         shell: bash
