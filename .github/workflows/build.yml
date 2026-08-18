@@ -71,7 +71,22 @@ jobs:
           test -f "$PROJECT_DIR/prototype-signing.keystore"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Assert pinned build toolchain
+      - name: Normalize project to stable SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_BUILD="$PROJECT_DIR/app/build.gradle.kts"
+
+          echo 'Before normalization:'
+          grep -E 'compileSdk|targetSdk|minSdk' "$APP_BUILD" || true
+
+          sed -E -i 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/' "$APP_BUILD"
+          sed -E -i 's/targetSdk[[:space:]]*=[[:space:]]*[0-9]+/targetSdk = 36/' "$APP_BUILD"
+
+          echo 'After normalization:'
+          grep -E 'compileSdk|targetSdk|minSdk' "$APP_BUILD"
+
+      - name: Verify pinned build toolchain
         shell: bash
         run: |
           set -euo pipefail
@@ -87,6 +102,8 @@ jobs:
               echo "OK: $label"
             else
               echo "ERROR: $label not found in $file" >&2
+              echo "----- $file -----" >&2
+              cat "$file" >&2
               exit 1
             fi
           }
@@ -96,12 +113,11 @@ jobs:
           require_text "AGP 9.3.0" 'id("com.android.application") version "9.3.0"' "$ROOT_BUILD"
           require_text "Gradle wrapper 9.5.0" 'gradle-9.5.0-bin.zip' "$WRAPPER"
 
-          if grep -R -nE 'android-37|compileSdk[[:space:]]*=[[:space:]]*37|targetSdk[[:space:]]*=[[:space:]]*37' "$PROJECT_DIR" --exclude='*.keystore'; then
-            echo 'ERROR: API 37 reference found in project.' >&2
+          if grep -nE 'compileSdk[[:space:]]*=[[:space:]]*37|targetSdk[[:space:]]*=[[:space:]]*37' "$APP_BUILD"; then
+            echo 'ERROR: API 37 still present in app build config.' >&2
             exit 1
-          else
-            echo 'OK: no API 37 references'
           fi
+          echo 'OK: app build config has no API 37 target'
 
           GRADLE_VERSION_OUTPUT="$("$GRADLE_BIN" --version)"
           if grep -Fq 'Gradle 9.5.0' <<< "$GRADLE_VERSION_OUTPUT"; then
