@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -23,11 +24,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: ''
 
-      - name: Install Android platform and build tools
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0" "platform-tools"
+      - name: Install proven Android SDK 36 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle 9.5.0
         uses: gradle/actions/setup-gradle@v6
@@ -45,12 +48,35 @@ jobs:
           PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
           test -n "$PROJECT_DIR"
           test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/build.gradle.kts"
+          test -f "$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
           test -f "$PROJECT_DIR/prototype-signing.keystore"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Assert pinned build toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_BUILD="$PROJECT_DIR/app/build.gradle.kts"
+          ROOT_BUILD="$PROJECT_DIR/build.gradle.kts"
+          WRAPPER="$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties"
+
+          grep -q 'compileSdk = 36' "$APP_BUILD"
+          grep -q 'targetSdk = 36' "$APP_BUILD"
+          grep -q 'id("com.android.application") version "9.3.0"' "$ROOT_BUILD"
+          grep -q 'gradle-9.5.0-bin.zip' "$WRAPPER"
+
+          if grep -R -n 'android-37\|compileSdk = 37\|targetSdk = 37' "$PROJECT_DIR" --exclude='*.keystore'; then
+            echo 'ERROR: API 37 reference found in project.' >&2
+            exit 1
+          fi
+
+          echo 'Pinned toolchain verified: SDK 36 / Build Tools 36.0.0 / AGP 9.3.0 / Gradle 9.5.0 / JDK 17'
 
       - name: Verify prototype signing key
         shell: bash
         run: |
+          set -euo pipefail
           keytool -list \
             -keystore "$PROJECT_DIR/prototype-signing.keystore" \
             -storepass randotone-prototype \
@@ -68,11 +94,12 @@ jobs:
         shell: bash
         run: |
           echo "===== Compiler/build errors ====="
-          grep -nE '(^e: | error: |error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed)' build.log || true
+          grep -nE '(^e: | error: |error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|Could not resolve|SDK location not found)' build.log || true
 
       - name: Verify APK signature
         shell: bash
         run: |
+          set -euo pipefail
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
           test -f "$APK"
           apksigner verify --verbose --print-certs "$APK"
