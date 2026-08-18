@@ -8,6 +8,7 @@ on:
       - 'RandoTone-v0.2.0-prototype-ci.zip'
       - 'tools/patch-randotone-v0.3.py'
       - 'tools/patch-osine-v0.4.py'
+      - 'tools/hotfix-osine-v0.4-ci.py'
       - '.github/workflows/build.yml'
 
 permissions:
@@ -72,6 +73,7 @@ jobs:
 
           python3 tools/patch-randotone-v0.3.py "$PROJECT_DIR"
           python3 tools/patch-osine-v0.4.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.4-ci.py "$PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Verify osine v0.4 diagnostics source
@@ -97,6 +99,7 @@ jobs:
           grep -q 'MAX_BYTES = 256L \* 1024L' "$KOTLIN/OsineLog.kt"
           grep -q 'class OsineApplication' "$KOTLIN/OsineApplication.kt"
           grep -q 'onTaskRemoved' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q 'override fun onDestroy' "$KOTLIN/RandoToneNotificationListener.kt"
           grep -q 'OsineLog.event(applicationContext, "NLS", "onListenerConnected")' "$KOTLIN/RandoToneNotificationListener.kt"
           grep -q '"NOTIF"' "$KOTLIN/RandoToneNotificationListener.kt"
           grep -q 'OsineDiagnosticsSection' "$KOTLIN/MainActivity.kt"
