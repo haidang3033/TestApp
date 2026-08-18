@@ -1,4 +1,4 @@
-name: Build osine v0.4 APK
+name: Build osine v0.5 APK
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
       - 'tools/patch-randotone-v0.3.py'
       - 'tools/patch-osine-v0.4.py'
       - 'tools/hotfix-osine-v0.4-ci.py'
+      - 'tools/patch-osine-v0.5.py'
       - '.github/workflows/build.yml'
 
 permissions:
@@ -59,7 +60,7 @@ jobs:
           echo "GRADLE_BIN=$GRADLE_HOME/bin/gradle" >> "$GITHUB_ENV"
           "$GRADLE_HOME/bin/gradle" --version
 
-      - name: Assemble osine v0.4 source tree
+      - name: Assemble osine v0.5 source tree
         shell: bash
         run: |
           set -euo pipefail
@@ -74,9 +75,10 @@ jobs:
           python3 tools/patch-randotone-v0.3.py "$PROJECT_DIR"
           python3 tools/patch-osine-v0.4.py "$PROJECT_DIR"
           python3 tools/hotfix-osine-v0.4-ci.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.5.py "$PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify osine v0.4 diagnostics source
+      - name: Verify osine v0.5 recovery source
         shell: bash
         run: |
           set -euo pipefail
@@ -87,27 +89,46 @@ jobs:
 
           grep -q 'compileSdk = 36' "$APP_BUILD"
           grep -q 'targetSdk = 36' "$APP_BUILD"
-          grep -q 'versionCode = 4' "$APP_BUILD"
-          grep -q 'versionName = "0.4.0"' "$APP_BUILD"
+          grep -q 'versionCode = 5' "$APP_BUILD"
+          grep -q 'versionName = "0.5.0"' "$APP_BUILD"
           grep -q '<string name="app_name">osine</string>' "$STRINGS"
           grep -q 'android:name=".OsineApplication"' "$MANIFEST"
           grep -q 'RECEIVE_BOOT_COMPLETED' "$MANIFEST"
           grep -q 'ListenerRecoveryReceiver' "$MANIFEST"
           grep -q 'android.intent.action.BOOT_COMPLETED' "$MANIFEST"
+          grep -q 'android.service.notification.default_autobind_listenerservice' "$MANIFEST"
+          grep -q 'android:value="true"' "$MANIFEST"
+
           grep -q 'object OsineLog' "$KOTLIN/OsineLog.kt"
           grep -q 'MAX_FILES = 5' "$KOTLIN/OsineLog.kt"
           grep -q 'MAX_BYTES = 256L \* 1024L' "$KOTLIN/OsineLog.kt"
-          grep -q 'class OsineApplication' "$KOTLIN/OsineApplication.kt"
+          grep -q 'ListenerRecovery.onProcessStart(this)' "$KOTLIN/OsineApplication.kt"
+
+          grep -q 'NotificationListenerService.requestUnbind(component)' "$KOTLIN/ListenerRecovery.kt"
+          grep -q 'NotificationListenerService.requestRebind(component)' "$KOTLIN/ListenerRecovery.kt"
+          grep -q 'hard-rebind submitted' "$KOTLIN/ListenerRecovery.kt"
+          grep -q 'awaiting onListenerConnected' "$KOTLIN/ListenerRecovery.kt"
+          grep -q 'connection confirmed' "$KOTLIN/ListenerRecovery.kt"
+          grep -q 'scheduleHealthCheck' "$KOTLIN/ListenerRecovery.kt"
+          grep -q 'hardRecoverForReceiver' "$KOTLIN/ListenerRecovery.kt"
+          grep -q 'goAsync()' "$KOTLIN/ListenerRecoveryReceiver.kt"
+
           grep -q 'onTaskRemoved' "$KOTLIN/RandoToneNotificationListener.kt"
           grep -q 'override fun onDestroy' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q 'markProcessListenerGone' "$KOTLIN/RandoToneNotificationListener.kt"
+          grep -q 'scheduleHealthCheck(applicationContext, "listener-disconnected")' "$KOTLIN/RandoToneNotificationListener.kt"
           grep -q 'OsineLog.event(applicationContext, "NLS", "onListenerConnected")' "$KOTLIN/RandoToneNotificationListener.kt"
           grep -q '"NOTIF"' "$KOTLIN/RandoToneNotificationListener.kt"
+
           grep -q 'OsineDiagnosticsSection' "$KOTLIN/MainActivity.kt"
+          grep -q 'Deep repair listener' "$KOTLIN/MainActivity.kt"
+          grep -q 'ListenerRecovery.requestHardRecovery(context, "manual-repair")' "$KOTLIN/MainActivity.kt"
+          grep -q 'Battery optimisation settings' "$KOTLIN/MainActivity.kt"
+          grep -q 'ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS' "$KOTLIN/MainActivity.kt"
           grep -q 'Export logs' "$KOTLIN/MainActivity.kt"
           grep -q 'Copy recent log' "$KOTLIN/MainActivity.kt"
           grep -q 'Clear logs' "$KOTLIN/MainActivity.kt"
           grep -q 'Notification message text is never recorded' "$KOTLIN/MainActivity.kt"
-          grep -q 'NotificationListenerService.requestRebind(component)' "$KOTLIN/ListenerRecovery.kt"
           grep -q 'fun updateNotificationEnabled(enabled: Boolean)' "$KOTLIN/RandoToneState.kt"
           grep -q 'android.substName' "$KOTLIN/RandoToneNotificationListener.kt"
 
@@ -116,7 +137,7 @@ jobs:
             -storepass randotone-prototype \
             -alias randotone-prototype >/dev/null
 
-          echo 'osine v0.4 source, diagnostics and signing identity verified.'
+          echo 'osine v0.5 recovery source, diagnostics and signing identity verified.'
 
       - name: Build signed debug APK
         shell: bash
@@ -151,8 +172,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/osine-v0.4.0-diagnostics.apk
-          sha256sum dist/osine-v0.4.0-diagnostics.apk > dist/SHA256SUMS.txt
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/osine-v0.5.0-recovery-experiment.apk
+          sha256sum dist/osine-v0.5.0-recovery-experiment.apk > dist/SHA256SUMS.txt
           keytool -list -v \
             -keystore "$PROJECT_DIR/prototype-signing.keystore" \
             -storepass randotone-prototype \
@@ -162,7 +183,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
-          name: osine-v0.4.0-diagnostics-signed
+          name: osine-v0.5.0-recovery-experiment-signed
           path: dist/
           if-no-files-found: error
           retention-days: 30
