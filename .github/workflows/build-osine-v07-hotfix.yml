@@ -1,0 +1,169 @@
+name: Build osine v0.7 APK hotfix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'RandoTone-v0.2.0-prototype-ci.zip'
+      - 'tools/patch-randotone-v0.3.py'
+      - 'tools/patch-osine-v0.4.py'
+      - 'tools/hotfix-osine-v0.4-ci.py'
+      - 'tools/patch-osine-v0.5.py'
+      - 'tools/patch-osine-v0.6.py'
+      - 'tools/hotfix-osine-v0.6-ci.py'
+      - 'tools/prepatch-osine-v0.7-manifest-shape.py'
+      - 'tools/patch-osine-v0.7.py'
+      - '.github/workflows/build-osine-v07-hotfix.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK 36 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install verified Gradle 9.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_ZIP="$RUNNER_TEMP/gradle-9.5.0-bin.zip"
+          GRADLE_HOME="$RUNNER_TEMP/gradle-9.5.0"
+          curl -fL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "$GRADLE_ZIP" \
+            "https://services.gradle.org/distributions/gradle-9.5.0-bin.zip"
+          echo "553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746  $GRADLE_ZIP" | sha256sum -c -
+          rm -rf "$GRADLE_HOME"
+          unzip -q "$GRADLE_ZIP" -d "$RUNNER_TEMP"
+          test -x "$GRADLE_HOME/bin/gradle"
+          echo "GRADLE_BIN=$GRADLE_HOME/bin/gradle" >> "$GITHUB_ENV"
+
+      - name: Assemble osine v0.7 hotfixed source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf work
+          mkdir work
+          unzip -q RandoTone-v0.2.0-prototype-ci.zip -d work
+          PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -n "$PROJECT_DIR"
+          test -f "$PROJECT_DIR/prototype-signing.keystore"
+
+          python3 tools/patch-randotone-v0.3.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.4.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.4-ci.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.5.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.6.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.6-ci.py "$PROJECT_DIR"
+          python3 tools/prepatch-osine-v0.7-manifest-shape.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.7.py "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify Direct Boot and no-vampires invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_BUILD="$PROJECT_DIR/app/build.gradle.kts"
+          MANIFEST="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          KOTLIN="$PROJECT_DIR/app/src/main/java/com/randotone/app"
+
+          grep -q 'compileSdk = 36' "$APP_BUILD"
+          grep -q 'targetSdk = 36' "$APP_BUILD"
+          grep -q 'versionCode = 7' "$APP_BUILD"
+          grep -q 'versionName = "0.7.0"' "$APP_BUILD"
+
+          grep -q 'android.intent.action.LOCKED_BOOT_COMPLETED' "$MANIFEST"
+          grep -A10 'android:name=".ListenerRecoveryReceiver"' "$MANIFEST" | grep -q 'android:directBootAware="true"'
+          grep -A12 'android:name=".OsineKeepAliveService"' "$MANIFEST" | grep -q 'android:directBootAware="true"'
+          grep -q 'android:stopWithTask="false"' "$MANIFEST"
+          grep -q 'android:foregroundServiceType="specialUse"' "$MANIFEST"
+
+          test -f "$KOTLIN/OsineBootState.kt"
+          grep -q 'createDeviceProtectedStorageContext' "$KOTLIN/OsineBootState.kt"
+          grep -q 'roulette_enabled' "$KOTLIN/OsineBootState.kt"
+          grep -q 'manager.isUserUnlocked' "$KOTLIN/OsineBootState.kt"
+
+          grep -q 'Intent.ACTION_LOCKED_BOOT_COMPLETED' "$KOTLIN/ListenerRecoveryReceiver.kt"
+          grep -q 'locked-boot-completed' "$KOTLIN/ListenerRecoveryReceiver.kt"
+          grep -q 'LOCKED_POLL_MS = 2000L' "$KOTLIN/OsineKeepAliveService.kt"
+          grep -q 'user unlocked; Direct-Boot runtime promoted' "$KOTLIN/OsineKeepAliveService.kt"
+          grep -q 'keepalive-user-unlocked' "$KOTLIN/OsineKeepAliveService.kt"
+          grep -q 'return START_STICKY' "$KOTLIN/OsineKeepAliveService.kt"
+
+          grep -q 'ListenerRecovery.cancelPending' "$KOTLIN/OsineOperation.kt"
+          grep -q 'OsineKeepAliveService.stop' "$KOTLIN/OsineOperation.kt"
+          grep -q 'if (!OsineOperation.isEnabled(applicationContext)) return' "$KOTLIN/RandoToneNotificationListener.kt"
+
+          keytool -list \
+            -keystore "$PROJECT_DIR/prototype-signing.keystore" \
+            -storepass randotone-prototype \
+            -alias randotone-prototype >/dev/null
+
+          echo 'osine v0.7 Direct Boot, swipe survival and OFF shutdown invariants verified.'
+
+      - name: Build signed debug APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$PROJECT_DIR"
+          "$GRADLE_BIN" --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Show useful compiler errors on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== Compiler/build errors ====="
+          if test -f build.log; then
+            grep -nE '(^e: | error: |error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|Could not resolve|SDK location not found|Foreground service)' build.log || true
+          else
+            echo 'Build did not reach Gradle compilation; inspect the failed assembly/verification step.'
+          fi
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/osine-v0.7.0-direct-boot-survival.apk
+          sha256sum dist/osine-v0.7.0-direct-boot-survival.apk > dist/SHA256SUMS.txt
+          keytool -list -v \
+            -keystore "$PROJECT_DIR/prototype-signing.keystore" \
+            -storepass randotone-prototype \
+            -alias randotone-prototype \
+            | grep -E 'SHA256:' > dist/SIGNING_CERT_SHA256.txt
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: osine-v0.7.0-direct-boot-survival-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
