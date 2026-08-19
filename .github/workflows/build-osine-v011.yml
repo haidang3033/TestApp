@@ -1,0 +1,142 @@
+name: Build osine v0.11 Call Roulette APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'RandoTone-v0.2.0-prototype-ci.zip'
+      - 'tools/patch-randotone-v0.3.py'
+      - 'tools/patch-osine-v0.4.py'
+      - 'tools/hotfix-osine-v0.4-ci.py'
+      - 'tools/patch-osine-v0.5.py'
+      - 'tools/patch-osine-v0.6.py'
+      - 'tools/hotfix-osine-v0.6-ci.py'
+      - 'tools/prepatch-osine-v0.7-manifest-shape.py'
+      - 'tools/patch-osine-v0.7.py'
+      - 'tools/patch-osine-v0.8.py'
+      - 'tools/patch-osine-v0.9.py'
+      - 'tools/patch-osine-v0.10.py'
+      - 'tools/hotfix-osine-v0.10-ci.py'
+      - 'tools/patch-osine-v0.11.py'
+      - '.github/workflows/build-osine-v011.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Install verified Gradle 9.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          Z="$RUNNER_TEMP/gradle-9.5.0-bin.zip"
+          curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$Z" https://services.gradle.org/distributions/gradle-9.5.0-bin.zip
+          echo "553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746  $Z" | sha256sum -c -
+          unzip -q "$Z" -d "$RUNNER_TEMP"
+          echo "GRADLE_BIN=$RUNNER_TEMP/gradle-9.5.0/bin/gradle" >> "$GITHUB_ENV"
+      - name: Assemble osine v0.11 source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/patch-osine-v0.11.py
+          rm -rf work && mkdir work
+          unzip -q RandoTone-v0.2.0-prototype-ci.zip -d work
+          PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -n "$PROJECT_DIR"
+          test -f "$PROJECT_DIR/prototype-signing.keystore"
+          python3 tools/patch-randotone-v0.3.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.4.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.4-ci.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.5.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.6.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.6-ci.py "$PROJECT_DIR"
+          python3 tools/prepatch-osine-v0.7-manifest-shape.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.7.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.8.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.9.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.10.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.10-ci.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.11.py "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+      - name: Verify v0.11 invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          B="$PROJECT_DIR/app/build.gradle.kts"
+          M="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          K="$PROJECT_DIR/app/src/main/java/com/randotone/app"
+          L="$K/RandoToneNotificationListener.kt"
+          A="$K/MainActivity.kt"
+          grep -q 'compileSdk = 36' "$B"
+          grep -q 'targetSdk = 36' "$B"
+          grep -q 'versionCode = 11' "$B"
+          grep -q 'versionName = "0.11.0"' "$B"
+          grep -q 'android.intent.action.LOCKED_BOOT_COMPLETED' "$M"
+          grep -q 'android:stopWithTask="false"' "$M"
+          grep -q 'return START_STICKY' "$K/OsineKeepAliveService.kt"
+          grep -q 'if (!OsineOperation.isEnabled(applicationContext)) return' "$L"
+          grep -q 'OsineCallEngine.posted' "$L"
+          grep -q 'OsineCallEngine.removed' "$L"
+          grep -q 'USAGE_NOTIFICATION_RINGTONE' "$K/OsineCallEngine.kt"
+          grep -q 'isLooping = true' "$K/OsineCallEngine.kt"
+          grep -q 'CALL_REMOVE' "$K/OsineCallEngine.kt"
+          grep -q 'Notification.EXTRA_CALL_TYPE' "$K/OsineCallEngine.kt"
+          grep -q 'Call Roulette' "$A"
+          grep -q 'navigationExpanded' "$A"
+          grep -q 'width(if (expanded) 168.dp else 56.dp)' "$A"
+          grep -q 'HINT_HOST_DISABLE_CALL_EFFECTS' "$K/OsineRingtoneLab.kt"
+          grep -q 'OsineCallEngine.stopAll(context, "operation-stop")' "$K/OsineRingtoneLab.kt"
+          ! grep -q 'android.permission.QUERY_ALL_PACKAGES' "$M"
+          keytool -list -keystore "$PROJECT_DIR/prototype-signing.keystore" -storepass randotone-prototype -alias randotone-prototype >/dev/null
+          echo 'osine v0.11 invariants verified.'
+      - name: Build signed debug APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$PROJECT_DIR"
+          "$GRADLE_BIN" --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/build-v011.log"
+      - name: Show compiler errors
+        if: failure()
+        shell: bash
+        run: |
+          grep -nE '(^e: | error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|CallEngine|CallRoulette|Unresolved reference)' build-v011.log || true
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+      - name: Collect artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/osine-v0.11.0-call-roulette.apk
+          sha256sum dist/osine-v0.11.0-call-roulette.apk > dist/SHA256SUMS.txt
+          keytool -list -v -keystore "$PROJECT_DIR/prototype-signing.keystore" -storepass randotone-prototype -alias randotone-prototype | grep 'SHA256:' > dist/SIGNING_CERT_SHA256.txt
+      - name: Upload APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: osine-v0.11.0-call-roulette-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
