@@ -96,7 +96,7 @@ jobs:
           grep -q 'OsineCallEngine.posted' "$L"
           grep -q 'OsineCallEngine.removed' "$L"
           grep -q 'USAGE_NOTIFICATION_RINGTONE' "$K/OsineCallEngine.kt"
-          grep -q 'isLooping = true' "$K/OsineCallEngine.kt"
+          grep -Eq 'isLooping[[:space:]]*=[[:space:]]*true' "$K/OsineCallEngine.kt"
           grep -q 'CALL_REMOVE' "$K/OsineCallEngine.kt"
           grep -q 'Notification.EXTRA_CALL_TYPE' "$K/OsineCallEngine.kt"
           grep -q 'Call Roulette' "$A"
