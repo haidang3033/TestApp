@@ -1,0 +1,184 @@
+name: Build NotifLab v0.4.2 Full-screen Call Lab APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'NotifLab-v0.1.0-ci.zip'
+      - 'NotifLab-v0.3.0-src/**'
+      - 'tools/patch-notiflab-v0.4-call-lab.py'
+      - 'tools/hotfix-notiflab-v0.4.1-diagnostics.py'
+      - 'tools/patch-notiflab-v0.4.2-fullscreen.py'
+      - '.github/workflows/build-notiflab-v042-fullscreen.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install verified Gradle 9.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_ZIP="$RUNNER_TEMP/gradle-9.5.0-bin.zip"
+          GRADLE_HOME="$RUNNER_TEMP/gradle-9.5.0"
+          curl -fL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "$GRADLE_ZIP" \
+            "https://services.gradle.org/distributions/gradle-9.5.0-bin.zip"
+          echo "553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746  $GRADLE_ZIP" | sha256sum -c -
+          rm -rf "$GRADLE_HOME"
+          unzip -q "$GRADLE_ZIP" -d "$RUNNER_TEMP"
+          test -x "$GRADLE_HOME/bin/gradle"
+          echo "GRADLE_BIN=$GRADLE_HOME/bin/gradle" >> "$GITHUB_ENV"
+
+      - name: Assemble NotifLab v0.4.2 source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/notiflab-v042"
+          mkdir -p "$RUNNER_TEMP/notiflab-v042"
+
+          unzip -q NotifLab-v0.1.0-ci.zip -d "$RUNNER_TEMP/notiflab-v042"
+          PROJECT_DIR="$RUNNER_TEMP/notiflab-v042/NotifLab-v0.1.0"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/notiflab-signing.keystore"
+
+          V03="$GITHUB_WORKSPACE/NotifLab-v0.3.0-src"
+          cp "$V03/app/build.gradle.kts" "$PROJECT_DIR/app/build.gradle.kts"
+          cp "$V03/app/src/main/AndroidManifest.xml" "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          cp "$V03/app/src/main/java/com/randotone/notiflab/MainActivity.kt" \
+            "$PROJECT_DIR/app/src/main/java/com/randotone/notiflab/MainActivity.kt"
+          cp "$V03/app/src/main/java/com/randotone/notiflab/NotifLabService.kt" \
+            "$PROJECT_DIR/app/src/main/java/com/randotone/notiflab/NotifLabService.kt"
+          cp "$V03/README.md" "$PROJECT_DIR/README.md"
+
+          python3 tools/patch-notiflab-v0.4-call-lab.py "$PROJECT_DIR"
+          python3 tools/hotfix-notiflab-v0.4.1-diagnostics.py "$PROJECT_DIR"
+          python3 tools/patch-notiflab-v0.4.2-fullscreen.py "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify full-screen Call Lab source
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_BUILD="$PROJECT_DIR/app/build.gradle.kts"
+          MANIFEST="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          KOTLIN="$PROJECT_DIR/app/src/main/java/com/randotone/notiflab"
+          CALL_LAB="$KOTLIN/FakeCallLabActivity.kt"
+          FSI_UI="$KOTLIN/FakeFullScreenCallActivity.kt"
+          MAIN="$KOTLIN/MainActivity.kt"
+
+          grep -q 'compileSdk = 36' "$APP_BUILD"
+          grep -q 'targetSdk = 36' "$APP_BUILD"
+          grep -q 'versionCode = 6' "$APP_BUILD"
+          grep -q 'versionName = "0.4.2"' "$APP_BUILD"
+
+          # Old harness + diagnostics stay alive.
+          grep -q 'FOREGROUND_SERVICE_SPECIAL_USE' "$MANIFEST"
+          grep -q 'android:stopWithTask="false"' "$MANIFEST"
+          grep -q 'android:name=".NotifLabApplication"' "$MANIFEST"
+          grep -q 'Thread.setDefaultUncaughtExceptionHandler' "$KOTLIN/NotifLabApplication.kt"
+          grep -q 'notiflab-diagnostics' "$KOTLIN/NotifLabLog.kt"
+
+          # Full-screen call path.
+          grep -q 'android.permission.USE_FULL_SCREEN_INTENT' "$MANIFEST"
+          grep -q 'android:name=".FakeFullScreenCallActivity"' "$MANIFEST"
+          grep -q 'android:showWhenLocked="true"' "$MANIFEST"
+          grep -q 'android:turnScreenOn="true"' "$MANIFEST"
+          test -f "$FSI_UI"
+          grep -q 'setShowWhenLocked(true)' "$FSI_UI"
+          grep -q 'setTurnScreenOn(true)' "$FSI_UI"
+          grep -q 'Notification.CallStyle.forIncomingCall' "$CALL_LAB"
+          grep -q 'setFullScreenIntent(fullScreenIntent, true)' "$CALL_LAB"
+          grep -q 'canUseFullScreenIntent()' "$CALL_LAB"
+          grep -q 'ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT' "$CALL_LAB"
+          grep -q 'Full-screen call • Android default ringtone' "$CALL_LAB"
+          grep -q 'Full-screen call • silent source' "$CALL_LAB"
+          grep -q 'AudioAttributes.USAGE_NOTIFICATION_RINGTONE' "$CALL_LAB"
+          grep -q 'Notification.FLAG_INSISTENT' "$CALL_LAB"
+
+          # Keep direct policy probes beside the new FSI path.
+          grep -q 'Direct CallStyle • Android default ringtone' "$CALL_LAB"
+          grep -q 'Direct CallStyle • silent source' "$CALL_LAB"
+
+          # User-requested real file export.
+          grep -q 'Export diagnostics log' "$MAIN"
+          grep -q 'Intent.ACTION_CREATE_DOCUMENT' "$MAIN"
+          grep -q 'notiflab-diagnostics-' "$MAIN"
+
+          keytool -list \
+            -keystore "$PROJECT_DIR/notiflab-signing.keystore" \
+            -storepass notiflab-prototype \
+            -alias notiflab-prototype >/dev/null
+
+          echo 'NotifLab v0.4.2 full-screen Call Lab invariants verified.'
+
+      - name: Build APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$PROJECT_DIR"
+          "$GRADLE_BIN" --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/notiflab-v042-build.log"
+
+      - name: Show useful compiler errors on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== NotifLab v0.4.2 build errors ====="
+          if test -f notiflab-v042-build.log; then
+            grep -nE '(^e: | error: |error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|Could not resolve|SDK location not found|FullScreen|fullScreen|CallStyle|ACTION_CREATE_DOCUMENT)' notiflab-v042-build.log || true
+          else
+            echo 'Build did not reach Gradle compilation; inspect assembly/verification.'
+          fi
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+
+      - name: Collect artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/NotifLab-v0.4.2-fullscreen-call-lab.apk
+          sha256sum dist/NotifLab-v0.4.2-fullscreen-call-lab.apk > dist/SHA256SUMS.txt
+          keytool -list -v \
+            -keystore "$PROJECT_DIR/notiflab-signing.keystore" \
+            -storepass notiflab-prototype \
+            -alias notiflab-prototype \
+            | grep 'SHA256:' > dist/SIGNING_CERT_SHA256.txt
+
+      - name: Upload NotifLab APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: NotifLab-v0.4.2-fullscreen-call-lab
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
