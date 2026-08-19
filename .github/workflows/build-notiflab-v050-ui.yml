@@ -1,0 +1,138 @@
+name: Build NotifLab v0.5 UI Overhaul APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'NotifLab-v0.1.0-ci.zip'
+      - 'NotifLab-v0.3.0-src/**'
+      - 'tools/patch-notiflab-v0.4-call-lab.py'
+      - 'tools/hotfix-notiflab-v0.4.1-diagnostics.py'
+      - 'tools/patch-notiflab-v0.4.2-fullscreen.py'
+      - 'tools/patch-notiflab-v0.4.3-true-fsi.py'
+      - 'tools/hotfix-notiflab-v0.4.4-call-ui.py'
+      - 'tools/patch-notiflab-v0.5-ui-overhaul.py'
+      - '.github/workflows/build-notiflab-v050-ui.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Install verified Gradle 9.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          Z="$RUNNER_TEMP/gradle-9.5.0-bin.zip"
+          curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$Z" https://services.gradle.org/distributions/gradle-9.5.0-bin.zip
+          echo "553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746  $Z" | sha256sum -c -
+          unzip -q "$Z" -d "$RUNNER_TEMP"
+          echo "GRADLE_BIN=$RUNNER_TEMP/gradle-9.5.0/bin/gradle" >> "$GITHUB_ENV"
+      - name: Assemble NotifLab v0.5 source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/patch-notiflab-v0.4.3-true-fsi.py tools/hotfix-notiflab-v0.4.4-call-ui.py tools/patch-notiflab-v0.5-ui-overhaul.py
+          rm -rf "$RUNNER_TEMP/notiflab-v050" && mkdir -p "$RUNNER_TEMP/notiflab-v050"
+          unzip -q NotifLab-v0.1.0-ci.zip -d "$RUNNER_TEMP/notiflab-v050"
+          PROJECT_DIR="$RUNNER_TEMP/notiflab-v050/NotifLab-v0.1.0"
+          V03="$GITHUB_WORKSPACE/NotifLab-v0.3.0-src"
+          cp "$V03/app/build.gradle.kts" "$PROJECT_DIR/app/build.gradle.kts"
+          cp "$V03/app/src/main/AndroidManifest.xml" "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          cp "$V03/app/src/main/java/com/randotone/notiflab/MainActivity.kt" "$PROJECT_DIR/app/src/main/java/com/randotone/notiflab/MainActivity.kt"
+          cp "$V03/app/src/main/java/com/randotone/notiflab/NotifLabService.kt" "$PROJECT_DIR/app/src/main/java/com/randotone/notiflab/NotifLabService.kt"
+          cp "$V03/README.md" "$PROJECT_DIR/README.md"
+          python3 tools/patch-notiflab-v0.4-call-lab.py "$PROJECT_DIR"
+          python3 tools/hotfix-notiflab-v0.4.1-diagnostics.py "$PROJECT_DIR"
+          python3 tools/patch-notiflab-v0.4.2-fullscreen.py "$PROJECT_DIR"
+          python3 tools/patch-notiflab-v0.4.3-true-fsi.py "$PROJECT_DIR"
+          python3 tools/hotfix-notiflab-v0.4.4-call-ui.py "$PROJECT_DIR"
+          python3 tools/patch-notiflab-v0.5-ui-overhaul.py "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+      - name: Verify v0.5 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          B="$PROJECT_DIR/app/build.gradle.kts"
+          M="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          K="$PROJECT_DIR/app/src/main/java/com/randotone/notiflab"
+          A="$K/MainActivity.kt"
+          C="$K/FakeCallLabActivity.kt"
+          grep -q 'compileSdk = 36' "$B"
+          grep -q 'targetSdk = 36' "$B"
+          grep -q 'versionCode = 9' "$B"
+          grep -q 'versionName = "0.5.0"' "$B"
+          grep -q 'DASHBOARD("Dashboard")' "$A"
+          grep -q 'NOTIFICATIONS("Notification Lab")' "$A"
+          grep -q 'CALLS("Call Lab")' "$A"
+          grep -q 'DIAGNOSTICS("Diagnostics")' "$A"
+          grep -q 'Open dedicated Call Lab' "$A"
+          grep -q 'Immediate FSI probe' "$A"
+          grep -q 'TRUE background FSI' "$A"
+          grep -q 'Export diagnostics log' "$A"
+          grep -q 'HorizontalScrollView' "$A"
+          grep -q 'NotifLab Call Lab • v0.5' "$C"
+          grep -q 'TRUE FSI in 7s' "$C"
+          grep -q 'minHeight = dp(52)' "$C"
+          grep -q 'ScrollView(this)' "$C"
+          grep -q 'android.permission.USE_FULL_SCREEN_INTENT' "$M"
+          grep -q 'android:showWhenLocked="true"' "$M"
+          grep -q 'android:turnScreenOn="true"' "$M"
+          grep -q 'setFullScreenIntent(fullScreenIntent, true)' "$K/TrueFullScreenCallPoster.kt"
+          grep -q 'render incoming-call layout' "$K/FakeFullScreenCallActivity.kt"
+          grep -q 'Thread.setDefaultUncaughtExceptionHandler' "$K/NotifLabApplication.kt"
+          grep -q 'FOREGROUND_SERVICE_TYPE_SPECIAL_USE' "$K/NotifLabService.kt"
+          grep -q 'return START_STICKY' "$K/NotifLabService.kt"
+          keytool -list -keystore "$PROJECT_DIR/notiflab-signing.keystore" -storepass notiflab-prototype -alias notiflab-prototype >/dev/null
+          echo 'NotifLab v0.5 invariants verified.'
+      - name: Build APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$PROJECT_DIR"
+          "$GRADLE_BIN" --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/notiflab-v050-build.log"
+      - name: Show compiler errors
+        if: failure()
+        shell: bash
+        run: |
+          grep -nE '(^e: | error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|MainActivity|FakeCallLab|TRUE_FSI|Unresolved reference|No value passed)' notiflab-v050-build.log || true
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+      - name: Collect artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/NotifLab-v0.5.0-ui-overhaul.apk
+          sha256sum dist/NotifLab-v0.5.0-ui-overhaul.apk > dist/SHA256SUMS.txt
+          keytool -list -v -keystore "$PROJECT_DIR/notiflab-signing.keystore" -storepass notiflab-prototype -alias notiflab-prototype | grep 'SHA256:' > dist/SIGNING_CERT_SHA256.txt
+      - name: Upload APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: NotifLab-v0.5.0-ui-overhaul
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
