@@ -28,7 +28,7 @@ if 'import android.widget.ScrollView\n' not in t:
     t = t.replace(marker, marker + 'import android.widget.ScrollView\n', 1)
 
 old = '        setContentView(buildUi())\n'
-new = '''        setContentView(ScrollView(this).apply {\n            isFillViewport = true\n            clipToPadding = false\n            addView(\n                buildUi(),\n                ScrollView.LayoutParams(\n                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,\n                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT\n                )\n            )\n        })\n'''
+new = '''        setContentView(ScrollView(this).apply {\n            isFillViewport = true\n            clipToPadding = false\n            addView(\n                buildUi(),\n                android.view.ViewGroup.LayoutParams(\n                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,\n                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT\n                )\n            )\n        })\n'''
 if old not in t:
     raise SystemExit('FakeCallLabActivity setContentView marker missing')
 t = t.replace(old, new, 1)
