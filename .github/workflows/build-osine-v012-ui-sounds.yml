@@ -1,0 +1,161 @@
+name: Build osine v0.12 UI + Sound Profiles APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'RandoTone-v0.2.0-prototype-ci.zip'
+      - 'tools/patch-randotone-v0.3.py'
+      - 'tools/patch-osine-v0.4.py'
+      - 'tools/hotfix-osine-v0.4-ci.py'
+      - 'tools/patch-osine-v0.5.py'
+      - 'tools/patch-osine-v0.6.py'
+      - 'tools/hotfix-osine-v0.6-ci.py'
+      - 'tools/prepatch-osine-v0.7-manifest-shape.py'
+      - 'tools/patch-osine-v0.7.py'
+      - 'tools/patch-osine-v0.8.py'
+      - 'tools/patch-osine-v0.9.py'
+      - 'tools/patch-osine-v0.10.py'
+      - 'tools/hotfix-osine-v0.10-ci.py'
+      - 'tools/patch-osine-v0.11.py'
+      - 'tools/hotfix-osine-v0.11.1-call-audio-bypass.py'
+      - 'tools/patch-osine-v0.12-ui-sounds.py'
+      - '.github/workflows/build-osine-v012-ui-sounds.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Install verified Gradle 9.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          Z="$RUNNER_TEMP/gradle-9.5.0-bin.zip"
+          curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$Z" https://services.gradle.org/distributions/gradle-9.5.0-bin.zip
+          echo "553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746  $Z" | sha256sum -c -
+          unzip -q "$Z" -d "$RUNNER_TEMP"
+          echo "GRADLE_BIN=$RUNNER_TEMP/gradle-9.5.0/bin/gradle" >> "$GITHUB_ENV"
+      - name: Assemble osine v0.12 source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/patch-osine-v0.11.py tools/hotfix-osine-v0.11.1-call-audio-bypass.py tools/patch-osine-v0.12-ui-sounds.py
+          rm -rf work && mkdir work
+          unzip -q RandoTone-v0.2.0-prototype-ci.zip -d work
+          PROJECT_DIR="$(find work -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -n "$PROJECT_DIR"
+          test -f "$PROJECT_DIR/prototype-signing.keystore"
+          python3 tools/patch-randotone-v0.3.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.4.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.4-ci.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.5.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.6.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.6-ci.py "$PROJECT_DIR"
+          python3 tools/prepatch-osine-v0.7-manifest-shape.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.7.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.8.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.9.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.10.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.10-ci.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.11.py "$PROJECT_DIR"
+          python3 tools/hotfix-osine-v0.11.1-call-audio-bypass.py "$PROJECT_DIR"
+          python3 tools/patch-osine-v0.12-ui-sounds.py "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+      - name: Verify v0.12 invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          B="$PROJECT_DIR/app/build.gradle.kts"
+          M="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          K="$PROJECT_DIR/app/src/main/java/com/randotone/app"
+          A="$K/MainActivity.kt"
+          L="$K/RandoToneNotificationListener.kt"
+          C="$K/OsineCallEngine.kt"
+          P="$K/OsineSoundProfiles.kt"
+          V="$K/OsineSoundPreview.kt"
+          grep -q 'compileSdk = 36' "$B"
+          grep -q 'targetSdk = 36' "$B"
+          grep -q 'versionCode = 13' "$B"
+          grep -q 'versionName = "0.12.0"' "$B"
+          grep -q 'android.intent.action.LOCKED_BOOT_COMPLETED' "$M"
+          grep -q 'android:stopWithTask="false"' "$M"
+          grep -q 'return START_STICKY' "$K/OsineKeepAliveService.kt"
+          grep -q 'if (!OsineOperation.isEnabled(applicationContext)) return' "$L"
+          grep -q 'HOME("Home"' "$A"
+          grep -q 'GENERAL("Notifications"' "$A"
+          grep -q 'SOUNDS("Sounds"' "$A"
+          grep -q 'DIAGNOSTICS("Diagnostics"' "$A"
+          grep -q 'SETTINGS("Settings"' "$A"
+          grep -q 'mutableStateOf(OsineSection.HOME)' "$A"
+          grep -q 'OsineSoundProfileCard' "$A"
+          grep -q 'Local display name' "$A"
+          grep -q 'Volume %' "$A"
+          grep -q 'Start point (ms)' "$A"
+          grep -q 'Play duration' "$A"
+          grep -q 'Set artwork' "$A"
+          grep -q 'data class OsineSoundProfile' "$P"
+          grep -q 'MediaMetadataRetriever' "$P"
+          grep -q 'original' "$A"
+          grep -q 'USAGE_NOTIFICATION' "$V"
+          grep -q 'profile.durationMs' "$V"
+          grep -q 'OsineSoundProfiles.get(c,s.uri)' "$C"
+          grep -q 'profile.volumePercent' "$C"
+          grep -q 'profile.startMs' "$C"
+          grep -q 'usage=notification-bypass' "$C"
+          grep -q 'HINT_HOST_DISABLE_CALL_EFFECTS' "$K/OsineRingtoneLab.kt"
+          grep -q 'OsineCallEngine.stopAll(context, "operation-stop")' "$K/OsineRingtoneLab.kt"
+          ! grep -q 'android.permission.QUERY_ALL_PACKAGES' "$M"
+          keytool -list -keystore "$PROJECT_DIR/prototype-signing.keystore" -storepass randotone-prototype -alias randotone-prototype >/dev/null
+          echo 'osine v0.12 invariants verified.'
+      - name: Build signed debug APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$PROJECT_DIR"
+          "$GRADLE_BIN" --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/build-v012.log"
+      - name: Show compiler errors
+        if: failure()
+        shell: bash
+        run: |
+          grep -nE '(^e: | error: |\.kt:[0-9]+:[0-9]+|Android resource linking failed|Manifest merger failed|OsineSound|MainActivity|Unresolved reference|No value passed)' build-v012.log || true
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+      - name: Collect artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" dist/osine-v0.12.0-ui-sound-profiles.apk
+          sha256sum dist/osine-v0.12.0-ui-sound-profiles.apk > dist/SHA256SUMS.txt
+          keytool -list -v -keystore "$PROJECT_DIR/prototype-signing.keystore" -storepass randotone-prototype -alias randotone-prototype | grep 'SHA256:' > dist/SIGNING_CERT_SHA256.txt
+      - name: Upload APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: osine-v0.12.0-ui-sound-profiles-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
